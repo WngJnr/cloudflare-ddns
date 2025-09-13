@@ -1,0 +1,70 @@
+name: Build and Release
+
+on:
+  push:
+    branches:
+      - main
+      - 'dev_*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: 'Build'
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        goos: [linux, windows]
+        goarch: [amd64]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.24'
+
+      - name: Build ${{ matrix.goos }}-${{ matrix.goarch }}
+        run: |
+          mkdir -p dist
+          BIN_NAME=ddns-${{ matrix.goos }}-${{ matrix.goarch }}
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            BIN_NAME="$BIN_NAME.exe"
+          fi
+          gitCommit=$(git log --pretty=format:"%H" -1)
+          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
+          go build -tags "timetzdata" -trimpath -ldflags="-w -s -X main.Version=${gitCommit}" \
+          -o dist/$BIN_NAME ./cmd/ddns
+
+      - name: Upload artifact (for debugging)
+        uses: actions/upload-artifact@v3
+        with:
+          name: ddns-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v3
+        with:
+          path: ./release-assets
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          body: |
+            🚀 Auto build from tag ${{ github.ref_name }}
+
+            包含 Linux 和 Windows 可执行文件。
+          files: ./release-assets/**/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
